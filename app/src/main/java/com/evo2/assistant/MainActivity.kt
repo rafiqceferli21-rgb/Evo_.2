@@ -10,9 +10,8 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
+import android.os.Build
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -23,8 +22,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import java.net.URLEncoder
-import java.util.Locale
 
 class MainActivity : Activity() {
     private lateinit var statusView: TextView
@@ -32,7 +29,7 @@ class MainActivity : Activity() {
     private lateinit var songInput: EditText
     private lateinit var contactInput: EditText
     private lateinit var messageInput: EditText
-    private var speechRecognizer: SpeechRecognizer? = null
+    private lateinit var voiceButton: Button
     private var selectedPhoneNumber: String? = null
     private var torchCameraId: String? = null
     private var torchOn = false
@@ -75,13 +72,22 @@ class MainActivity : Activity() {
         voiceCard.addView(label("Mahnı axtar, fənəri idarə et və ya mesaj hazırla.", 14f, Color.WHITE, false).also {
             it.setPadding(0, dp(8), 0, dp(14))
         })
-        val listenButton = actionButton("🎙  Dinlə", accent, background)
-        listenButton.setOnClickListener { requestListening() }
-        voiceCard.addView(listenButton, matchWrap())
+        voiceButton = actionButton("🎙  Daimi dinləməni başlat", accent, background)
+        voiceButton.setOnClickListener { toggleVoiceListening() }
+        voiceCard.addView(voiceButton, matchWrap())
         transcriptView = label("Əmr burada görünəcək", 14f, Color.rgb(190, 201, 220), false).also {
             it.setPadding(0, dp(12), 0, 0)
         }
         voiceCard.addView(transcriptView)
+        voiceCard.addView(label("YouTube açılandan sonra da dinləyəcək. “Ekranı aşağı sürüşdür” əmri üçün Əlçatanlıq icazəsini aktiv et.", 13f, Color.rgb(169, 181, 205), false).also {
+            it.setPadding(0, dp(12), 0, dp(8))
+        })
+        val accessibilityButton = actionButton("Sürüşdürmə icazəsini aktiv et", Color.rgb(49, 67, 98), Color.WHITE)
+        accessibilityButton.setOnClickListener {
+            try { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            catch (_: Exception) { sayStatus("Parametrlərdən Əlçatanlıq bölməsini aç.") }
+        }
+        voiceCard.addView(accessibilityButton, matchWrap())
         content.addView(voiceCard, matchWrap(dp(14)))
 
         val musicCard = panel(card)
@@ -185,83 +191,28 @@ class MainActivity : Activity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    private fun requestListening() {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            sayStatus("Bu telefonda səs tanıma xidməti tapılmadı. Aşağıdakı sahələrdən istifadə et.")
+    private fun toggleVoiceListening() {
+        if (VoiceCommandService.isRunning) {
+            stopService(Intent(this, VoiceCommandService::class.java).setAction(VoiceCommandService.ACTION_STOP))
+            voiceButton.text = "🎙  Daimi dinləməni başlat"
+            sayStatus("Səsli dinləmə dayandırıldı.")
             return
         }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC_PERMISSION)
-        } else startListening()
+        val needed = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
+        if (Build.VERSION.SDK_INT >= 33) needed.add(Manifest.permission.POST_NOTIFICATIONS)
+        val missing = needed.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isEmpty()) startVoiceService()
+        else requestPermissions(missing.toTypedArray(), MIC_PERMISSION)
     }
 
-    private fun startListening() {
+    private fun startVoiceService() {
         try {
-            speechRecognizer?.destroy()
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).also { recognizer ->
-                recognizer.setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) = sayStatus("Dinləyirəm…")
-                    override fun onBeginningOfSpeech() = Unit
-                    override fun onRmsChanged(rmsdB: Float) = Unit
-                    override fun onBufferReceived(buffer: ByteArray?) = Unit
-                    override fun onEndOfSpeech() = sayStatus("Səs yoxlanılır…")
-                    override fun onError(error: Int) {
-                        sayStatus(when (error) {
-                            SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Səs aydın eşidilmədi. Yenidən yoxla."
-                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mikrofon icazəsi lazımdır."
-                            SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Səs xidməti üçün internet bağlantısını yoxla."
-                            else -> "Səs tanınmadı. Yenidən cəhd et."
-                        })
-                    }
-                    override fun onResults(results: Bundle?) {
-                        val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                        if (spoken.isBlank()) sayStatus("Əmr tanınmadı.") else handleVoiceCommand(spoken)
-                    }
-                    override fun onPartialResults(partialResults: Bundle?) = Unit
-                    override fun onEvent(eventType: Int, params: Bundle?) = Unit
-                })
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "az-AZ")
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "az-AZ")
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                    putExtra(RecognizerIntent.EXTRA_PROMPT, "EVO-2-yə əmrini de")
-                }
-                recognizer.startListening(intent)
-            }
+            val intent = Intent(this, VoiceCommandService::class.java).setAction(VoiceCommandService.ACTION_START)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+            voiceButton.text = "■  Daimi dinləməni dayandır"
+            sayStatus("EVO-2 dinləyir. YouTube açılandan sonra da əmr verə bilərsən.")
         } catch (_: Exception) {
-            sayStatus("Səs tanıma başladılmadı. Mətni sahəyə daxil et.")
-        }
-    }
-
-    private fun handleVoiceCommand(spoken: String) {
-        transcriptView.text = "“$spoken”"
-        val normalized = spoken.lowercase(Locale.forLanguageTag("az-AZ"))
-        when {
-            listOf("fənəri yandır", "feneri yandir", "fənər yandır", "flashlight on", "feneri aç").any { normalized.contains(it) } -> requestTorch(true)
-            listOf("fənəri söndür", "feneri sondur", "fənər söndür", "flashlight off", "feneri bağla").any { normalized.contains(it) } -> requestTorch(false)
-            normalized.contains("youtube") || normalized.contains("youtube-da") || normalized.contains("youtube-də") -> {
-                val cleaned = spoken.replace(Regex("(?i)youtube(?:-da|-də|-de|-da)?"), " ")
-                    .replace(Regex("(?i)\\b(aç|ac|oxut|çal|cal|mahnı|mahnini|mahnını|tap|axtar)\\b"), " ")
-                    .replace(Regex("\\s+"), " ").trim()
-                val query = cleaned.ifBlank { spoken }
-                songInput.setText(query)
-                openYouTube(query)
-            }
-            normalized.contains("whatsapp") || normalized.contains("mesaj") || normalized.contains("mesajı") -> {
-                val body = spoken.replace(Regex("(?i)whatsapp(?:-da|-də|-de)?"), " ")
-                    .replace(Regex("(?i)\\b(mesaj yaz|mesajı yaz|mesaj gonder|mesaj göndər|göndər)\\b"), " ")
-                    .replace(Regex("\\s+"), " ").trim()
-                if (body.isNotBlank()) messageInput.setText(body)
-                messageInput.requestFocus()
-                sayStatus("Mesaj yazıldı. Kontaktı seç, sonra WhatsApp-da hazırla.")
-            }
-            else -> {
-                transcriptView.text = "“$spoken”"
-                songInput.setText(spoken)
-                messageInput.setText(spoken)
-                sayStatus("Əmr tanınmadı. Mətni mahnı və ya mesaj kimi istifadə edə bilərsən.")
-            }
+            sayStatus("Daimi dinləmə başlamadı. Mikrofon və bildiriş icazələrini yoxla.")
         }
     }
 
@@ -374,8 +325,17 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         when (requestCode) {
-            MIC_PERMISSION -> if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startListening()
-                else sayStatus("Səsli əmr üçün mikrofon icazəsi verilmədi.")
+            MIC_PERMISSION -> {
+                val micIndex = permissions.indexOf(Manifest.permission.RECORD_AUDIO)
+                val micGranted = micIndex >= 0 && grantResults.getOrNull(micIndex) == PackageManager.PERMISSION_GRANTED
+                val cameraIndex = permissions.indexOf(Manifest.permission.CAMERA)
+                val cameraGranted = (cameraIndex >= 0 && grantResults.getOrNull(cameraIndex) == PackageManager.PERMISSION_GRANTED) ||
+                    checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                if (micGranted) {
+                    startVoiceService()
+                    if (!cameraGranted) sayStatus("Dinləmə başladı. Fənər əmri üçün EVO-2-yə kamera icazəsi ver.")
+                } else sayStatus("Daimi dinləmə üçün mikrofon icazəsi lazımdır.")
+            }
             CAMERA_PERMISSION -> {
                 val desired = pendingTorchState
                 pendingTorchState = null
@@ -391,8 +351,13 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        speechRecognizer?.destroy()
-        speechRecognizer = null
         super.onDestroy()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::voiceButton.isInitialized) {
+            voiceButton.text = if (VoiceCommandService.isRunning) "■  Daimi dinləməni dayandır" else "🎙  Daimi dinləməni başlat"
+        }
     }
 }

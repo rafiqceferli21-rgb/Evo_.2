@@ -14,18 +14,22 @@ The project uses Gradle 8.9, Android Gradle Plugin 8.7.3, Kotlin 2.0.21, Java 17
 
 ## Voice commands
 
-Tap **Dinlə** and say a command. Examples:
+Tap **Daimi dinləməni başlat** and allow microphone, camera, and notification access. EVO-2 keeps listening while YouTube is open; tap **Daimi dinləməni dayandır** or the notification action to stop it. Examples:
 
+- “YouTube-ni aç” — opens the YouTube app (or website if the app is not installed).
 - “YouTube-da [mahnının adı] aç” or “YouTube-də [mahnının adı] oxut” — opens YouTube search results. Choose a result to start playback.
-- “Fənəri yandır” / “Fənəri söndür” — toggles the torch.
+- “Fənəri aç” / “Fənəri yandır” / “Fənəri söndür” — toggles the torch.
+- “Ekranı aşağı sürüşdür” — swipes up once so lower page content becomes visible. Enable **Sürüşdürmə icazəsini aktiv et** in EVO-2, then enable **EVO-2 ekran əmrləri** in Android Accessibility settings.
 - For WhatsApp, say the message or type it in the message field, choose a contact with **Kontakt seç**, then tap **WhatsApp-da hazırla**. Android opens a prefilled conversation for review; tap Send in WhatsApp yourself.
 
-The speech engine depends on the speech recognition service installed on the device. EVO-2 requests Azerbaijani (`az-AZ`); device services may fall back to another supported language. If recognition is unavailable, enter the song/message in the fields and use the action buttons.
+The speech engine depends on the speech recognition service installed on the device. EVO-2 tries Azerbaijani (`az-AZ`), then Turkish, Russian, and English if the recognition service reports a language unavailable. Some phones may require installing or enabling Google's speech recognition service.
 
 ## Permissions and privacy
 
-- **Microphone (`RECORD_AUDIO`)** is requested only when you tap the listening button. Speech is handled by Android's configured recognition service; its network/privacy behavior depends on that service and device settings.
-- **Camera (`CAMERA`)** is requested only when you use the flashlight. Android requires this permission for torch access on supported devices. EVO-2 does not capture photos or video.
+- **Microphone (`RECORD_AUDIO`)** is requested when you start continuous listening. Android shows the active microphone indicator and EVO-2 keeps an ongoing notification with a stop action. Speech is handled by Android's configured recognition service; its network/privacy behavior depends on that service and device settings.
+- **Camera (`CAMERA`)** is requested when you start voice listening so flashlight commands can work. Android requires this permission for torch access on supported devices. EVO-2 does not capture photos or video.
+- **Accessibility gesture access** is optional and must be enabled in Android Settings. EVO-2 uses it only to perform the requested screen swipe; it does not read screen content.
+- On Android 13 and later, EVO-2 asks to show the ongoing listening notification.
 - EVO-2 does not request contacts permission. Contact selection uses Android's system contact picker and uses the selected phone number only to open WhatsApp.
 - WhatsApp must be installed to open directly. If it is not available, Android offers compatible messaging apps.
 - YouTube search requires an internet connection. Search opens results and does not force autoplay; playback selection stays with the user.
